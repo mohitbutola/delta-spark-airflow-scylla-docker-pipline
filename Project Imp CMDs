@@ -1,0 +1,219 @@
+ADSREMEDY
+
+Data Engineering Assignment 2: 
+Delta Lake,Spark, ScyllaDB and Airflow Pipeline
+
+minikub : 1 node k8s working locally (master + worker processes on single node)
+kubctl(other methods UI /API) : interact with your local minikube virtual node. Its used for any k8s cluster
+
+
+docker-compose (dockerfile) : for single instance
+k8s : multi-intance of contines
+	Node 1			Node 2
+	pode1 ..poden	pode1..poden
+	container1...n	container1..n
+
+
+---------Project STRUCTURE
+adsremedy-assignment/
+
+│
+├── docker-compose.yml
+│
+├── data/
+│     └── delta-lake/
+│           └── customer_transactions/
+│
+├── spark/
+│     └── etl_job.py
+│
+├── airflow/
+│     └── dags/
+│           └── pipeline_dag.py
+│
+├── scylla/
+│     └── init.cql
+│
+├── data-generator/
+│     └── generate_data.py
+│
+└── README.md
+
+
+mkdir -p data/delta-lake/customer_transactions
+
+spark:
+io.delta:delta-core_2.12:2.4.0
+./data/delta-lake:/opt/spark/delta-lake
+SPARK_MASTER_HOST=spark-master
+
+	spark-master
+	spark-worker
+	scylla
+	airflow-webserver
+
+/opt/spark/delta-lake/customer_transactions
+
+
+docker compose down
+docker compose up -d
+
+spark ui : http://localhost:8080
+
+----- once spark master and worker conatiner are working with req spark and locations
+
+docker exec -it spark-master bash -- on ps you will see data lake and spark folder inside this container
+
+
+/opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/create_delta_table.py
+
+or 
+(expose this sprk-subit inside container so that whole path can be avoided "export PATH=$PATH:/opt/spark/bin")
+
+-------- other approch download spark dleta jar locally and make it accesiable to image
+
+curl -L -o jars/delta-spark_2.12-3.1.0.jar \ https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.1.0/delta-spark_2.12-3.1.0.jar
+
+
+---------- transform
+/opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/etl_transform.py
+
+
+-----scylla DB it usese csl i.e casandera query language
+docker exec -it scylla cqlsh -- go inside scylla db query shell
+
+CREATE KEYSPACE adsremedy
+WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+USE adsremedy;
+
+CREATE TABLE daily_customer_totals (
+  customer_id TEXT,
+  transaction_date DATE,
+  daily_total FLOAT,
+  PRIMARY KEY (customer_id, transaction_date)
+);
+
+exit
+
+-- ScyllaDB = Cassandra compatible.
+
+spark-cassandra-connector ---req connector for spark : bake it into image of spark as we did for delta 
+
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+
+--- load data into scylladb from delta spark
+/opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/load_to_scylla.py
+
+
+/opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ --packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1 \
+ /opt/spark/work-dir/load_to_scylla.py
+ 
+ 
+ --- works: after adding in docker file
+ RUN curl -L -o /opt/spark/jars/spark-cassandra-connector-assembly.jar \
+https://repo1.maven.org/maven2/com/datastax/spark/spark-cassandra-connector-assembly_2.12/3.3.0/spark-cassandra-connector-assembly_2.12-3.3.0.jar
+ 
+ 
+ /opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/load_to_scylla.py
+
+
+---- verify data ingestion in scylaa DB
+docker exec -it scylla cqlsh
+
+note cacendra connector by default perfom upsert based on primay key in scylab db table !!
+
+SELECT * FROM adsremedy.daily_customer_totals LIMIT 10;
+
+---- verify upsert:
+SELECT count(*) as rows, sum(daily_total) as total FROM daily_customer_totals;
+SELECT * FROM daily_customer_totals limit 3; --select 1 customer and change its total in raw file and run below spark job again
+SELECT * FROM daily_customer_totals where customer_id = 'C52145';
+
+/opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/create_delta_table.py
+ 
+  spark-submit --master spark://spark-master:7077 --name arrow-spark --deploy-mode cluster /opt/spark/work-dir/create_delta_table.py. 
+  
+  
+ /opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/etl_transform.py
+ 
+  /opt/spark/bin/spark-submit \
+ --master spark://spark-master:7077 \
+ /opt/spark/work-dir/load_to_scylla.py
+ 
+ SELECT count(*) as rows, sum(daily_total) as total FROM daily_customer_totals;
+ SELECT * FROM daily_customer_totals where customer_id = 'C52145';
+ 
+ 
+ 
+ 
+ -------- airflow:
+ 
+ docker exec -it airflow-webserver bash ---some issue with container name use conatiner id
+ 
+ docker exec -it d810f02645f291cda94b168e294ecf832f2c65bc7f9670e4df8660377ab0624b bash
+ 
+ airflow users create \
+ --username airflow \
+ --firstname Mohit \
+ --lastname Admin \
+ --role Admin \
+ --email admin@test.com \
+ --password airflow
+
+
+
+
+
+---------------- airflow docker set 
+
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
+
+docker compose down -v
+docker compose up -d --build 
+
+docker exec -it scheduler airflow connections add \
+    spark_default \
+    --conn-type spark \
+    --conn-host spark://spark-master \
+    --conn-port 7077
+	
+docker exec -it ace19f3e6c35c39a2af1fdbdd9463ef88b2e2c4bbf1b3e2e0f73f5dc07449f34 bash
+docker exec -it spark-master bash
+
+
+docker exec ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b ls -la /opt/spark/delta-lake/customer_transactions/
+
+docker exec --user root ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b ls -la /opt/spark/delta-lake/customer_transactions/
+
+
+docker exec --user 50000 ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b /opt/spark/bin/spark-submit --master spark://spark-master:7077 /opt/spark/work-dir/create_delta_table.py
+
+
+docker exec ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b env | grep -E "SPARK|JAVA|PATH"
+docker exec ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b which spark-submit
+docker exec ef655b084cb40eddd9496146c2eed1f78552610418b7312a2999b16c2739731b ls /opt/spark/jars/ | grep delta
+
+---create dfault connection in airflow
+docker exec -it 9895061f2b63faf26def6f67a58bc7564aecf1c4cd0bca0e3f17349aec6873d2 airflow connections add spark_default --conn-type spark --conn-host spark://spark-master --conn-port 7077
+
+
+docker exec --user root spark-worker chmod -R 777 /opt/spark/delta-lake/

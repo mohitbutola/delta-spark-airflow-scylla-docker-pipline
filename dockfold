@@ -1,0 +1,167 @@
+version: '3'
+
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+  env_file:
+    - airflow.env
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - project-network
+
+services:
+
+  spark-master:
+    build:
+      context: ./spark
+    container_name: spark-master
+    command: >
+      bash -c "
+        /opt/spark/sbin/start-master.sh &&
+        tail -f /dev/null
+      "
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./data/delta-lake:/opt/spark/delta-lake
+      - ./spark:/opt/spark/work-dir
+    networks:
+      - project-network
+
+  spark-worker:
+    build:
+      context: ./spark
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    command: >
+      bash -c "
+        /opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
+        tail -f /dev/null
+      "
+    volumes:
+      - ./data/delta-lake:/opt/spark/delta-lake
+      - ./spark:/opt/spark/work-dir
+    networks:
+      - project-network
+    environment:
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 1g
+      SPARK_MASTER_URL: spark://spark-master:7077
+
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: scylla
+    ports:
+      - "9042:9042"
+    command: --smp 1 --memory 1G --overprovisioned 1
+    networks:
+      - project-network
+
+  # airflow-db:
+  #   image: postgres:14.0
+  #   environment:
+  #     POSTGRES_USER: airflow
+  #     POSTGRES_PASSWORD: airflow
+  #     POSTGRES_DB: airflow
+  #   networks:
+  #     - project-network
+
+  postgres:
+    image: postgres:14.0
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    networks:
+      - project-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      - scheduler
+
+  scheduler:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username admin --firstname mohit --lastname Butola --role Admin --email mohitbutola18@gmail.com --password admin && airflow scheduler"
+
+  # airflow-webserver:
+  #     build: 
+  #       context: ./airflow
+  #     container_name: airflow-webserver
+  #     depends_on:
+  #       - airflow-init
+  #     environment:
+  #       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+  #       AIRFLOW__WEBSERVER__SECRET_KEY: "supersecretkey123"
+  #     volumes:
+  #       - ./airflow/dags:/opt/airflow/dags
+  #       - /var/run/docker.sock:/var/run/docker.sock
+  #       - ./spark:/opt/spark
+  #     ports:
+  #       - "8081:8080"
+  #     command: webserver 
+  #     networks:
+  #       - project-network
+
+  # airflow-scheduler:
+  #     build: 
+  #       context: ./airflow
+  #     container_name: airflow-scheduler
+  #     depends_on:
+  #       - airflow-webserver
+  #     environment:
+  #       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+  #       AIRFLOW__WEBSERVER__SECRET_KEY: "supersecretkey123"
+  #     volumes:
+  #       - ./airflow/dags:/opt/airflow/dags
+  #       - /var/run/docker.sock:/var/run/docker.sock
+  #       - ./spark:/opt/spark
+  #     command: scheduler
+  #     networks:
+  #       - project-network 
+
+  # airflow-init:
+  #   build: 
+  #     context: ./airflow
+  #   container_name: airflow-init
+  #   depends_on:
+  #     - airflow-db
+  #   environment:
+  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+  #     AIRFLOW__WEBSERVER__SECRET_KEY: "supersecretkey123"
+  #   volumes:
+  #     - ./airflow/dags:/opt/airflow/dags
+  #   entrypoint: /bin/bash
+  #   command: >
+  #     -c "
+  #       echo 'Waiting for postgres...';
+  #       until pg_isready -h airflow-db -p 5432; do
+  #         sleep 2;
+  #       done;
+  #       echo 'Postgres ready!';
+  #       airflow db migrate;
+  #       airflow users create --username airflow --firstname Mohit --lastname Admin --role Admin --email admin@test.com --password airflow || true;
+  #       "
+  #   networks: 
+  #     - project-network
+
+networks:
+  project-network:
+    driver: bridge

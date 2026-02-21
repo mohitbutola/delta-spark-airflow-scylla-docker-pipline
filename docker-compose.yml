@@ -1,0 +1,151 @@
+version: '3'
+
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+  env_file:
+    - airflow.env
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./spark:/opt/spark/work-dir        # ← share your spark scripts with airflow
+    - ./data/delta-lake:/opt/spark/delta-lake
+    - spark-jars:/opt/spark/jars        # ← ADD THIS
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - project-network
+
+services:
+
+  postgres:
+    image: postgres:14.0
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    networks:
+      - project-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      scheduler:
+        condition: service_healthy    # ← waits until db migrate is done
+
+  scheduler:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username admin --firstname mohit --lastname Butola --role Admin --email mohitbutola18@gmail.com --password admin && airflow connections add spark_default --conn-type spark --conn-host spark://spark-master --conn-port 7077 && airflow scheduler"
+    healthcheck:
+      test: ["CMD-SHELL", "airflow db check"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s     # gives db migrate time to finish
+
+  spark-master:
+    build:
+      context: ./spark
+    container_name: spark-master
+    user: root
+    command: >
+      bash -c "
+        mkdir -p /opt/spark/delta-lake/customer_transactions/delta_table &&
+        mkdir -p /opt/spark/delta-lake/customer_transactions/transformed &&
+        chmod -R 777 /opt/spark/delta-lake &&
+        cp -n /opt/spark/jars-backup/*.jar /opt/spark/jars/ 2>/dev/null || true &&
+        /opt/spark/sbin/start-master.sh &&
+        tail -f /dev/null
+      "
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./data/delta-lake:/opt/spark/delta-lake
+      - ./spark:/opt/spark/work-dir
+      - spark-jars:/opt/spark/jars        # ← ADD THIS (same named volume)
+    networks:
+      - project-network
+    depends_on:
+      - volume-init
+
+  spark-worker:
+    build:
+      context: ./spark
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+      - volume-init
+    user: root
+    command: >
+      bash -c "
+        mkdir -p /opt/spark/delta-lake/customer_transactions/delta_table &&
+        mkdir -p /opt/spark/delta-lake/customer_transactions/transformed &&
+        chmod -R 777 /opt/spark/delta-lake &&
+        /opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
+        tail -f /dev/null
+      "
+    volumes:
+      - ./data/delta-lake:/opt/spark/delta-lake
+      - ./spark:/opt/spark/work-dir
+      - spark-jars:/opt/spark/jars        # ← ADD THIS (same named volume)
+    networks:
+      - project-network
+    environment:
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 1g
+      SPARK_MASTER_URL: spark://spark-master:7077
+
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: scylla
+    ports:
+      - "9042:9042"
+    command: --smp 1 --memory 1G --overprovisioned 1
+    volumes:
+      - ./scylla:/scylla-init          # mount init script
+    networks:
+      - project-network
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s                # scylla takes time to boot
+
+  volume-init:
+    image: busybox
+    command: sh -c "chmod -R 777 /opt/spark/delta-lake && mkdir -p /opt/spark/delta-lake/customer_transactions && chown -R 185:185 /opt/spark/delta-lake"
+    volumes:
+      - ./data/delta-lake:/opt/spark/delta-lake
+    networks:
+      - project-network
+
+  scylla-init:
+    image: scylladb/scylla:5.4
+    container_name: scylla-init
+    depends_on:
+      scylla:
+        condition: service_healthy     # ← only runs after scylla is ready
+    entrypoint: ""                          # ← override default entrypoint
+    command: bash -c "cqlsh scylla -f /scylla-init/init.cql"
+    # command: cqlsh scylla -f /scylla-init/init.cql
+    volumes:
+      - ./scylla:/scylla-init
+    networks:
+      - project-network
+
+networks:
+  project-network:
+    driver: bridge
+
+volumes:
+  spark-jars:
