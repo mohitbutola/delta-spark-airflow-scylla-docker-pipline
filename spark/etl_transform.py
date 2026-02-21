@@ -7,7 +7,7 @@ from pyspark.sql.functions import col, to_date, sum as _sum
 
 spark = (
     SparkSession.builder
-    .appName("Delta ETL Transformation")
+    .appName("Data transformation using Spark")
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
     .getOrCreate()

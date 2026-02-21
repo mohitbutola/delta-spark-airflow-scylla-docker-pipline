@@ -1,7 +1,7 @@
-CREATE KEYSPACE IF NOT EXISTS adsremedy
+CREATE KEYSPACE IF NOT EXISTS ads_db
 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
 
-USE adsremedy;
+USE ads_db;
 
 CREATE TABLE IF NOT EXISTS daily_customer_totals (
   customer_id TEXT,

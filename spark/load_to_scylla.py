@@ -2,7 +2,7 @@ from pyspark.sql import SparkSession
 
 spark = (
     SparkSession.builder
-    .appName("Load to ScyllaDB")
+    .appName("Data loading to ScyllaDB")
 
     # Delta configs (already working)
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
@@ -35,7 +35,7 @@ print("Data read from Delta Lake, now writing to ScyllaDB...")
     df.write
     .format("org.apache.spark.sql.cassandra")
     .mode("append")  # append = upsert
-    .option("keyspace", "adsremedy")
+    .option("keyspace", "ads_db")
     .option("table", "daily_customer_totals")
     .option("spark.cassandra.output.consistency.level", "LOCAL_ONE")
     .option("spark.cassandra.output.batch.size.rows", "100")

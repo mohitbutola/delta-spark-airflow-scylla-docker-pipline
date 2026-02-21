@@ -1,4 +1,4 @@
-ADSREMEDY
+ads_db
 
 Data Engineering Assignment 2: 
 Delta Lake,Spark, ScyllaDB and Airflow Pipeline
@@ -15,7 +15,7 @@ k8s : multi-intance of contines
 
 
 ---------Project STRUCTURE
-adsremedy-assignment/
+ads_db-assignment/
 
 │
 ├── docker-compose.yml
@@ -86,10 +86,10 @@ curl -L -o jars/delta-spark_2.12-3.1.0.jar \ https://repo1.maven.org/maven2/io/d
 -----scylla DB it usese csl i.e casandera query language
 docker exec -it scylla cqlsh -- go inside scylla db query shell
 
-CREATE KEYSPACE adsremedy
+CREATE KEYSPACE ads_db
 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
 
-USE adsremedy;
+USE ads_db;
 
 CREATE TABLE daily_customer_totals (
   customer_id TEXT,
@@ -135,7 +135,7 @@ docker exec -it scylla cqlsh
 
 note cacendra connector by default perfom upsert based on primay key in scylab db table !!
 
-SELECT * FROM adsremedy.daily_customer_totals LIMIT 10;
+SELECT * FROM ads_db.daily_customer_totals LIMIT 10;
 
 ---- verify upsert:
 SELECT count(*) as rows, sum(daily_total) as total FROM daily_customer_totals;
