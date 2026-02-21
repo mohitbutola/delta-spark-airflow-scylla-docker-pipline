@@ -219,7 +219,7 @@ SELECT count(*) AS rows, sum(daily_total) AS total FROM daily_customer_totals;
 SELECT * FROM daily_customer_totals LIMIT 10;
 
 -- Specific customer lookup
-SELECT * FROM daily_customer_totals WHERE customer_id = 'C52145';
+SELECT * FROM daily_customer_totals WHERE customer_id = 'C83372';
 ```
 
 <!-- SCREENSHOT PLACEHOLDER -->
@@ -274,10 +274,10 @@ Modify a transaction amount in the CSV and re-run:
 
 ```sql
 -- Before re-run
-SELECT * FROM daily_customer_totals WHERE customer_id = 'C52145';
+SELECT * FROM daily_customer_totals WHERE customer_id = 'C83372';
 
 -- Trigger DAG, then check again
-SELECT * FROM daily_customer_totals WHERE customer_id = 'C52145';
+SELECT * FROM daily_customer_totals WHERE customer_id = 'C83372';
 ```
 
 **Expected behaviour:** existing record updated, no duplicate rows created.
@@ -326,6 +326,6 @@ Monitor running Spark jobs at **http://localhost:8080**
 
 ## 👨‍💻 Author
 
-**Mohit Butola**
+**Mohit Butola** : https://www.linkedin.com/in/mohit-butola/
 
 ---
